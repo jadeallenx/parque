@@ -1,0 +1,14 @@
+{application, parque,
+ [
+  {description, "Erlang trading game engine"},
+  {vsn, git},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { parque_app, []}},
+  {env, []}
+ ]}.
+
+% vim:ft=erlang
