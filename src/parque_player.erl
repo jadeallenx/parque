@@ -4,7 +4,7 @@
 
 % public api
 -export([
-    start_link/1,
+    start_link/3,
     state/1,
     move/2,
     buy/3,
@@ -32,14 +32,14 @@
 }).
 
 % api
-start_link(Player) ->
-    gen_server:start({local, Player}, ?MODULE, [], []).
+start_link(Player, Cash, Capacity) ->
+    gen_server:start({local, Player}, ?MODULE, [Player, Cash, Capacity], []).
 
 state(Who) ->
     gen_server:call(Who, {state}).
 
 move(Who, Where) ->
-    case is_process_alive(Where) of
+    case lists:member(Where, registered()) of
         true ->
             gen_server:call(Who, {move, Where});
         false ->
@@ -56,8 +56,12 @@ afford(Who, Amount) ->
     gen_server:call(Who, {afford, Amount}).
 
 %% gen_server callbacks
-init([]) ->
-    {ok, #state{}}.
+init([Player, Cash, Capacity]) ->
+    {ok, #state{
+        name = Player,
+        cash = Cash,
+        capacity = Capacity
+    }}.
 
 handle_call(stop, _From, State) ->
     {stop, normal, stopped, State};
@@ -65,10 +69,17 @@ handle_call(stop, _From, State) ->
 handle_call({state}, _From, State) ->
     {reply, State, State};
 
+handle_call({move, Where}, _From, State = #state{ port = undefined }) ->
+    parque_port:arrive(Where, self()),
+    {reply, ok, State#state{ port = Where }};
+
 handle_call({move, Where}, _From, State = #state{ port = Port }) ->
     parque_port:leave(Port, self()),
     parque_port:arrive(Where, self()),
     {reply, ok, State#state{ port = Where }};
+
+handle_call({buy, _What, _Qty}, _From, State = #state{ port = undefined }) ->
+    {reply, {error, not_in_port}, State};
 
 handle_call({buy, What, Qty}, _From, State = #state{ port = Port, capacity = Capacity, cash = Cash, inventory = Inv }) ->
     {Reply, NewState} = case Qty > Capacity of
@@ -86,6 +97,9 @@ handle_call({buy, What, Qty}, _From, State = #state{ port = Port, capacity = Cap
             end
     end,
     {reply, Reply, NewState};
+
+handle_call({sell, _What, _Qty}, _From, State = #state{ port = undefined }) ->
+    {reply, {error, not_in_port}, State};
 
 handle_call({sell, What, Qty}, _From, State = #state{ port = Port, capacity = Capacity, cash = Cash, inventory = Inv}) ->
     {Reply, NewState} = case check_inventory(What, Qty, Inv) of

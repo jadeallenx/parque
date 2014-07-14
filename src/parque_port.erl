@@ -3,7 +3,7 @@
 -behaviour(gen_server).
 
 -export([
-    start_link/1,
+    start_link/2,
     state/1,
     arrive/2,
     leave/2,
@@ -36,8 +36,8 @@
 
 %% Public API
 
-start_link(Port) ->
-    gen_server:start({local, Port}, ?MODULE, [], []).
+start_link(Port, Goods) ->
+    gen_server:start({local, Port}, ?MODULE, [Port, Goods], []).
 
 state(Port) ->
     gen_server:call(Port, {state}).
@@ -58,8 +58,11 @@ list(Port) ->
     gen_server:call(Port, {list}).
 
 %% gen_server callbacks
-init([]) ->
-    {ok, #state{}}.
+init([Port, Goods]) ->
+    {ok, #state{
+        name = Port,
+        goods = Goods
+    }}.
 
 handle_call(stop, _From, State) ->
     {stop, normal, stopped, State};

@@ -1,15 +1,20 @@
 -module(parque).
 
 -export([
+    start/0,
     create_player/1,
     create_port/1
 ]).
 
+start() ->
+    random:seed(now()),
+    application:ensure_all_started(parque).
+
 create_player(Name) ->
-    parque_sup:start_player(Name, make_value(100), make_value(100, 10)).
+    parque_player_sup:start_player(Name, make_value(100), make_value(100, 10)).
 
 create_port(Name) ->
-    parque_sup:start_port(Name, select_goods(make_value(5))).
+    parque_port_sup:start_port(Name, select_goods(make_value(5))).
     
 % private functions
 make_value(N) ->
@@ -30,7 +35,7 @@ select_goods(N) ->
             orddict:store(Name, {make_price(MinP, MaxP), make_value(MaxQ)}, Acc)
         end,
         orddict:new(),
-        [ lists:nth(AllGoods, V) || V <- 
+        [ lists:nth(V, AllGoods) || V <- 
             [ make_value(length(AllGoods) + 1) || _ <- lists:seq(1,N) ]
         ]
     ).
