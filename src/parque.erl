@@ -11,7 +11,7 @@ start() ->
     application:ensure_all_started(parque).
 
 create_player(Name) ->
-    parque_player_sup:start_player(Name, make_value(100), make_value(100, 10)).
+    parque_player_sup:start_player(Name, make_value(10000), make_value(100, 10)).
 
 create_port(Name) ->
     parque_port_sup:start_port(Name, select_goods(make_value(5))).
@@ -36,7 +36,7 @@ select_goods(N) ->
         end,
         orddict:new(),
         [ lists:nth(V, AllGoods) || V <- 
-            [ make_value(length(AllGoods) + 1) || _ <- lists:seq(1,N) ]
+            [ make_value(length(AllGoods)) || _ <- lists:seq(1,N) ]
         ]
     ).
             
