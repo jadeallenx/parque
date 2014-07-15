@@ -8,8 +8,7 @@
     state/1,
     move/2,
     buy/3,
-    sell/3,
-    afford/2
+    sell/3
 ]).
 
 % required gen_server callbacks
@@ -39,11 +38,11 @@ state(Who) ->
     gen_server:call(Who, {state}).
 
 move(Who, Where) ->
-    case lists:member(Where, registered()) of
-        true ->
-            gen_server:call(Who, {move, Where});
-        false ->
-            error_logger:error_msg("There is no port named ~p", [Where])
+    case whereis(Where) of
+        undefined ->
+            error_logger:error_msg("There is no port named ~p", [Where]);
+        _Pid ->
+            gen_server:call(Who, {move, Where})
     end.
 
 buy(Who, What, Qty) ->
@@ -51,9 +50,6 @@ buy(Who, What, Qty) ->
 
 sell(Who, What, Qty) ->
     gen_server:call(Who, {sell, What, Qty}).
-
-afford(Who, Amount) ->
-    gen_server:call(Who, {afford, Amount}).
 
 %% gen_server callbacks
 init([Player, Cash, Capacity]) ->
@@ -81,19 +77,26 @@ handle_call({move, Where}, _From, State = #state{ port = Port }) ->
 handle_call({buy, _What, _Qty}, _From, State = #state{ port = undefined }) ->
     {reply, {error, not_in_port}, State};
 
-handle_call({buy, What, Qty}, _From, State = #state{ port = Port, capacity = Capacity, cash = Cash, inventory = Inv }) ->
+handle_call({buy, What, Qty}, _From, State = #state{ name = Name, port = Port, capacity = Capacity, cash = Cash, inventory = Inv }) ->
     {Reply, NewState} = case Qty > Capacity of
         true ->
             {{error, no_capacity}, State};
         false ->
-            case parque_port:buy(Port, self(), What, Qty) of
-                {ok, {Qty, Price}} ->
-                    NewCash = Cash - (Qty*Price),
-                    NewCapacity = Capacity - Qty,
-                    NewInv = update_inventory(What, Qty, Inv),
-                    {ok, State#state{ capacity = NewCapacity, cash = NewCash, inventory = NewInv}};
-                Err ->
-                    {Err, State}
+            case parque_port:get_price(Port, What, Qty) of
+                {error, Error} ->
+                    {{error, Error}, State};
+                {ok, Amount} when Amount >= Cash ->
+                    {{error, not_enough_cash}, State};
+                _ ->
+                    case parque_port:buy(Port, Name, What, Qty) of
+                        {ok, {Qty, Price}} ->
+                            NewCash = Cash - (Qty*Price),
+                            NewCapacity = Capacity - Qty,
+                            NewInv = update_inventory(What, Qty, Inv),
+                            {ok, State#state{ capacity = NewCapacity, cash = NewCash, inventory = NewInv}};
+                        Err ->
+                            {Err, State}
+                    end
             end
     end,
     {reply, Reply, NewState};
@@ -101,12 +104,12 @@ handle_call({buy, What, Qty}, _From, State = #state{ port = Port, capacity = Cap
 handle_call({sell, _What, _Qty}, _From, State = #state{ port = undefined }) ->
     {reply, {error, not_in_port}, State};
 
-handle_call({sell, What, Qty}, _From, State = #state{ port = Port, capacity = Capacity, cash = Cash, inventory = Inv}) ->
+handle_call({sell, What, Qty}, _From, State = #state{ name = Name, port = Port, capacity = Capacity, cash = Cash, inventory = Inv}) ->
     {Reply, NewState} = case check_inventory(What, Qty, Inv) of
         false ->
             {{error, {no_inventory, What}}, State};
         true ->
-            case parque_port:sell(Port, self(), What, Qty) of
+            case parque_port:sell(Port, Name, What, Qty) of
                 {ok, {Qty, Price}} ->
                     NewCash = Cash + (Qty * Price),
                     NewCapacity = Capacity + Qty,
@@ -117,9 +120,6 @@ handle_call({sell, What, Qty}, _From, State = #state{ port = Port, capacity = Ca
             end
     end,
     {reply, Reply, NewState};
-
-handle_call({afford, Amount}, _From, State = #state{ cash = Cash }) ->
-    {reply, Cash > Amount, State};
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.

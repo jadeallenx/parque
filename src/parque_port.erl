@@ -9,7 +9,8 @@
     leave/2,
     buy/4,
     sell/4,
-    list/1
+    list/1,
+    get_price/3
 ]).
 
 % gen_server callbacks
@@ -57,6 +58,9 @@ sell(Port, Who, What, Qty) ->
 list(Port) ->
     gen_server:call(Port, {list}).
 
+get_price(Port, What, Qty) ->
+    gen_server:call(Port, {get_price, What, Qty}).
+
 %% gen_server callbacks
 init([Port, Goods]) ->
     {ok, #state{
@@ -70,26 +74,28 @@ handle_call(stop, _From, State) ->
 handle_call({state}, _From, State) ->
     {reply, State, State};
 
-handle_call({arrive, Who}, _From, State = #state{name = Name, traders = Traders}) ->
+handle_call({arrive, Who}, _From, State = #state{name = Port, traders = Traders}) ->
+    {registered_name, WhoName} = process_info(Who, registered_name),
     NewTraders = case lists:member(Who, Traders) of
         true ->
-            error_logger:error_msg("~p is already at ~p!", [Who, Name]),
+            error_logger:error_msg("~p is already at ~p!", [WhoName, Port]),
             Traders;
         false ->
-            error_logger:info_msg("~p arrived at ~p.", [Who, Name]),
-            notify(Traders, {arrived, Name, Who}),
+            error_logger:info_msg("~p arrived at ~p.", [WhoName, Port]),
+            notify(Traders, {arrived, Port, WhoName}),
             [Who | Traders]
     end,
     {reply, ok, State#state{traders = NewTraders}};
 
-handle_call({leave, Who}, _From, State = #state{name = Name, traders = Traders}) ->
+handle_call({leave, Who}, _From, State = #state{name = Port, traders = Traders}) ->
+    {registered_name, WhoName} = process_info(Who, registered_name),
     NewTraders = case lists:member(Who, Traders) of
         false ->
-            error_logger:error_msg("~p isn't at ~p!", [Who, Name]),
+            error_logger:error_msg("~p isn't at ~p!", [WhoName, Port]),
             Traders;
         true ->
-            error_logger:info_msg("~p left ~p.", [Who, Name]),
-            notify(Traders, {departed, Name, Who}),
+            error_logger:info_msg("~p left ~p.", [WhoName, Port]),
+            notify(Traders, {departed, Port, WhoName}),
             lists:delete(Who, Traders)
     end,
     {reply, ok, State#state{traders = NewTraders}};
@@ -98,18 +104,12 @@ handle_call({buy, Who, What, Qty}, _From, State = #state{ name = Name, goods = G
     {Return, NewState} = 
         case orddict:find(What, Goods) of
             {ok, {QtyAvailable, Price}} when QtyAvailable >= Qty -> 
-                case parque_player:afford(Who, (Qty*Price)) of
-                    true ->
-                        NewQty = QtyAvailable - Qty,
-                        NewPrice = set_new_price(NewQty, QtyAvailable, Price),
-                        notify(Traders, {bought, Name, Who, What, Qty, Price, NewQty, NewPrice}),
-                        error_logger:info_msg("~p bought ~p ~p at ~p per unit (~p total).", [Who, Qty, What, Price, (Qty*Price)]),
-                        {{ok, {Qty, Price}}, 
-                            State#state{ goods = orddict:store(What, {NewQty, NewPrice}, Goods) }};
-                    false ->
-                        error_logger:error_msg("~p tried to buy ~p ~p at ~p per unit (~p total) but didn't have enough cash.", [Who, Qty, What, Price, (Qty*Price)]),
-                        {{error, not_enough_cash}, State}
-                end;
+                    NewQty = QtyAvailable - Qty,
+                    NewPrice = set_new_price(NewQty, QtyAvailable, Price),
+                    notify(Traders, {bought, Name, Who, What, Qty, Price, NewQty, NewPrice}),
+                    error_logger:info_msg("~p bought ~p ~p at ~p per unit (~p total).", [Who, Qty, What, Price, (Qty*Price)]),
+                    {{ok, {Qty, Price}}, 
+                    State#state{ goods = orddict:store(What, {NewQty, NewPrice}, Goods) }};
             {ok, {QtyAvailable, Price}} -> 
                 error_logger:error_msg("~p tried to buy ~p ~p at ~p per unit (~p total) but there's only ~p units of ~p available.", [Who, Qty, What, Price, (Qty*Price), QtyAvailable, What]),
                 {{error, {not_enough_qty, QtyAvailable}}, State};
@@ -136,6 +136,17 @@ handle_call({sell, Who, What, Qty}, _From, State = #state{ goods = Goods, trader
  
 handle_call({list}, _From, State = #state{ goods = Goods }) ->
     {reply, orddict:to_list(Goods), State};
+
+handle_call({get_price, What, Qty}, _From, State = #state{ goods = Goods }) ->
+    Reply = case orddict:find(What, Goods) of
+        {ok, {QtyAvailable, Price}} when QtyAvailable >= Qty ->
+            {ok, Qty * Price};
+        {ok, {QtyAvailable, _Price}} ->
+            {error, {not_enough_qty, QtyAvailable}};
+        error ->
+            {error, {no_such_good, What}}
+    end,
+    {reply, Reply, State};
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
